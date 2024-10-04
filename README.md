@@ -16,15 +16,31 @@ jobs:
     name: Check labels
     runs-on: ubuntu-latest
     outputs:
-      state: ${{ steps.check.outputs.label_check }}
+      do_backport: ${{ steps.result.outputs.do_backport }}
     steps:
-      - id: check
+      - id: prefix_check
         uses: agilepathway/label-checker@v1.6.55
         with:
           prefix_mode: true
           any_of: backport-to-
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
           allow_failure: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+      - id: label_filter
+        uses: agilepathway/label-checker@v1.6.55
+        with:
+          none_of: [ 'backport', 'was-backported' ]
+          allow_failure: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+      - id: result
+        name: Set output
+        shell: bash
+        run: |
+            {
+                [ '${{ steps.prefix_check.outputs.label_check }}' = 'success' ] \
+                && [ '${{ steps.label_filter.outputs.label_check }}' == 'success' ] \
+                && echo 'do_backport=true' \
+                || echo 'do_backport=false'
+            } >> "$GITHUB_OUTPUT"
       - name: Print status
         shell: bash
         run: 'echo "Label detection status: ${{ steps.check.outputs.label_check }}"'
@@ -32,7 +48,7 @@ jobs:
   backport:
     needs: [ label_checker ]
     name: Backport PR
-    if: github.event.pull_request.merged == true && needs.label_checker.outputs.state == 'success' && !(contains(github.event.pull_request.labels.*.name, 'backport')) && !(contains(github.event.pull_request.labels.*.name, 'was-backported'))
+    if: github.event.pull_request.merged == true && needs.label_checker.outputs.do_backport == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Backport Action
