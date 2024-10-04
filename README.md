@@ -12,33 +12,57 @@ on:
     types: ["labeled", "closed"]
 
 jobs:
+  label_checker:
+    name: Check labels
+    runs-on: ubuntu-latest
+    outputs:
+      do_backport: ${{ steps.result.outputs.do_backport }}
+    steps:
+      - id: prefix_check
+        uses: agilepathway/label-checker@v1.6.55
+        with:
+          prefix_mode: true
+          any_of: backport-to-
+          allow_failure: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+      - id: label_filter
+        uses: agilepathway/label-checker@v1.6.55
+        with:
+          none_of: [ 'backport', 'was-backported' ]
+          allow_failure: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+      - id: result
+        name: Set output
+        shell: bash
+        run: |
+            {
+                [ '${{ steps.prefix_check.outputs.label_check }}' = 'success' ] \
+                && [ '${{ steps.label_filter.outputs.label_check }}' == 'success' ] \
+                && echo 'do_backport=true' \
+                || echo 'do_backport=false'
+            } >> "$GITHUB_OUTPUT"
+      - name: Print status
+        shell: bash
+        run: 'echo "Label detection status: ${{ steps.check.outputs.label_check }}"'
+
   backport:
+    needs: [ label_checker ]
     name: Backport PR
-    if: github.event.pull_request.merged == true && !(contains(github.event.pull_request.labels.*.name, 'backport')) && !(contains(github.event.pull_request.labels.*.name, 'was-backported'))
+    if: github.event.pull_request.merged == true && needs.label_checker.outputs.do_backport == 'true'
     runs-on: ubuntu-latest
     steps:
-      - name: Check labels
-        id: preview_label_check
-        uses: docker://agilepathway/pull-request-label-checker:latest
-        with:
-          allow_failure: true
-          prefix_mode: true
-          one_of: backport-to-
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Backport Action
         uses: sorenlouv/backport-github-action@v9.5.1
-        if: steps.preview_label_check.outputs.label_check == 'success'
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           auto_backport_label_prefix: backport-to-
 
       - name: Info log
-        if: ${{ success() && steps.preview_label_check.outputs.label_check == 'success' }} 
+        if: ${{ success() }}
         run: cat ~/.backport/backport.info.log
         
       - name: Debug log
-        if: ${{ failure() && steps.preview_label_check.outputs.label_check == 'success' }}
+        if: ${{ failure() }}
         run: cat ~/.backport/backport.debug.log        
           
 ```
